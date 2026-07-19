@@ -45,7 +45,7 @@ fn parse_dash_args (args: Vec<&String>) -> Result<UniqArguments, OptionError> {
     }
 
     let count = count_arg.is_some();
-    let unique = unique_arg.is_some() || repeated_arg.is_none();
+    let unique = unique_arg.is_some();
     let repeated = repeated_arg.is_some();
     Ok (UniqArguments{
         count,
@@ -119,16 +119,6 @@ fn main() -> ExitCode {
     }
 }
 
-fn write_line (print_count: bool, streak_length: usize,
-               line: &String, output: &mut impl Write) -> io::Result<()> {
-    if print_count {
-        output.write_fmt(format_args!("\t{} ", streak_length))?;
-    }
-    output.write_all(line.as_bytes())?;
-    output.flush()?;
-    Ok (())
-}
-
 fn file_uniq(
     filename: &String,
     output: &mut impl Write,
@@ -159,21 +149,40 @@ fn file_uniq(
     ExitCode::SUCCESS
 }
 
-fn uniq(input: &mut impl BufRead, output: &mut impl Write,
-               args: &UniqArguments) -> Result<(), io::Error> {
-
-    if args.repeated {
-        uniq_repeated(input, output, args)
-    } else if args.unique {
-        uniq_unique(input, output, args)
-    } else {
-        panic!("Invalid combination of options.")
+fn on_streak_start(args: &UniqArguments, line: &String,
+                   output: &mut impl Write) -> io::Result<()> {
+    if args.unique || args.repeated {
+        // can't tell whether this line will be unique or repeated at streak start.
+        return Ok(())
     }
+
+    output.write_all(line.as_bytes())?;
+    output.flush()?;
+    Ok (())
 }
 
-fn uniq_unique(input: &mut impl BufRead, output: &mut impl Write,
+fn on_streak_end(args: &UniqArguments, streak_length: usize,
+                 line: &String, output: &mut impl Write) -> io::Result<()> {
+    if args.unique && streak_length > 1 { // not unique
+        return Ok (())
+    }
+    if args.repeated && streak_length < 2 { // not repeated
+        return Ok (())
+    }
+    if !args.unique && !args.repeated {
+        // default uniq eagerly prints unique lines, so nothing to print here.
+        return Ok (())
+    }
+    if args.count {
+        output.write_fmt(format_args!("\t{} ", streak_length))?;
+    }
+    output.write_all(line.as_bytes())?;
+    output.flush()?;
+    Ok(())
+}
+
+fn uniq(input: &mut impl BufRead, output: &mut impl Write,
         args: &UniqArguments) -> Result<(), io::Error> {
-    // basic uniq implementation
     let mut prev_line = String::new();
     let mut line = String::new();
     let mut prev_exists = false;
@@ -185,62 +194,23 @@ fn uniq_unique(input: &mut impl BufRead, output: &mut impl Write,
         if line_length == 0 {
             // check if active streak: guard against if file starts with EOF
             if streak_length > 0 { // print the previous line since this one is empty
-                write_line(args.count, streak_length, &prev_line, output)?;
+                on_streak_end(args, streak_length, &prev_line, output)?;
             }
             break; // EOF;
         }
 
-        if args.count {
-            // don't print until we know the final streak length
-            if prev_exists {
-                if prev_line == line { // extend the streak
-                    streak_length += 1;
-                } else { // end a streak (print the previous line)
-                    write_line(args.unique, streak_length, &prev_line, output)?;
-                    streak_length = 1;
-                }
-            } else {
+        // don't print until we know the final streak length
+        if prev_exists {
+            if prev_line == line { // extend the streak
                 streak_length += 1;
+            } else { // end a streak (print the previous line)
+                on_streak_end(args, streak_length, &prev_line, output)?;
+                streak_length = 1;
+                on_streak_start(args, &line, output)?;
             }
         } else {
-            // eagerly print unique
-            if !prev_exists || prev_line != line {
-                write_line(false, 0, &line, output)?;
-            }
-        }
-
-        std::mem::swap(&mut prev_line, &mut line); // swap without borrow checker issues
-        prev_exists = true;
-    }
-    Ok(())
-}
-
-fn uniq_repeated(input: &mut impl BufRead, output: &mut impl Write,
-        args: &UniqArguments) -> Result<(), io::Error> {
-    let mut prev_line = String::new();
-    let mut line = String::new();
-    let mut prev_exists = false;
-    let mut streak_length: usize = 0;
-    loop {
-        line.clear();
-        // ? returns io-exception if it happens
-        let line_length = input.read_line(&mut line)?;
-        if line_length == 0 {
-            if streak_length > 1 {
-                write_line(args.count, streak_length, &prev_line, output)?;
-            }
-            break; // EOF;
-        }
-
-        if !prev_exists || prev_line == line {
-            streak_length += 1;
-        }
-        if prev_exists && prev_line != line {
-            // ends a streak
-            if streak_length > 1 {
-                write_line(args.count, streak_length, &prev_line, output)?;
-            }
             streak_length = 1;
+            on_streak_start(args, &line, output)?;
         }
 
         std::mem::swap(&mut prev_line, &mut line); // swap without borrow checker issues
