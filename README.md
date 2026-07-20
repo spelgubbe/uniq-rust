@@ -7,3 +7,7 @@ It supports three options:
 - -c or --count: counts occurrences of lines
 
 I wrote this project to learn more Rust programming and it was inspired by the challenge at a website called Coding Challenges ([Build Your Own uniq Tool](https://codingchallenges.fyi/challenges/challenge-uniq)).
+
+## How to compile
+
+To compile the code you can use `cargo run` or `rustc src/main.rs`.
