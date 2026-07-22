@@ -27,14 +27,23 @@ enum OptionError {
     ExtraOperand(String),
 }
 
+fn parse_file_arg(arg: Option<&String>) -> Option<PathBuf> {
+    match arg.map(String::as_str) {
+        None | Some("-") => None, // default to stdin/stdout with "-" == None
+        Some(path) => Some(PathBuf::from(path))
+    }
+}
 fn parse_file_args(args: &[String]) -> Result<InputOutputOptions, OptionError> {
+
     let extra_operand = args.get(2);
     if let Some(extra_operand_str) = extra_operand {
         // Guard against too many arguments.
         return Err(OptionError::ExtraOperand(extra_operand_str.to_string()));
     }
-    let input_file_arg = args.first();
-    let output_file_arg = args.get(1);
+    let first = args.first ();
+    let second = args.get (1);
+    let input_file_arg = parse_file_arg (first);
+    let output_file_arg = parse_file_arg (second);
 
     let input_file = input_file_arg.map(PathBuf::from);
     let output_file = output_file_arg.map(PathBuf::from);
@@ -121,7 +130,8 @@ fn main() -> ExitCode {
 
     for arg in args[1..].iter() {
         if arg.trim() == "-" {
-            // skip the dash since it means stdin...
+            // - means stdin/stdout depending on position
+            file_args.push(arg.to_string());
         } else if arg.starts_with("-") {
             dash_args.push(arg);
         } else {
